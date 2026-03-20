@@ -1,0 +1,361 @@
+---
+title: "Examples"
+description: "Concrete curl, JavaScript, and Python examples for common Exchange API workflows."
+---
+
+## Health check
+
+Verify the service and persistence layer are up:
+
+```bash
+curl https://exchange.jamesxu.dev/health
+```
+
+## List markets
+
+No authentication required:
+
+```bash
+curl https://exchange.jamesxu.dev/api/v1/markets
+```
+
+## Provision a user (admin)
+
+<Steps>
+  <Step title="Send the provisioning request">
+    ```bash
+    curl -X POST \
+      -H "Authorization: Bearer ADMIN_API_TOKEN" \
+      -H "content-type: application/json" \
+      https://exchange.jamesxu.dev/api/v1/admin/users \
+      -d '{"username":"team-alpha"}'
+    ```
+  </Step>
+  <Step title="Receive the trader credentials">
+    The response includes the trader's assigned `api_key`. Store it securely — it is not recoverable.
+
+    ```json
+    {
+      "profile": {
+        "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+        "username": "team-alpha",
+        "api_key": "exch_1d4208be6fa84b8cb0a2e5cfa9508d5f",
+        "created_at": "2026-03-18T15:27:42.159901Z"
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Fetch account data (trader)
+
+All three requests use the `x-api-key` header. The `open-orders` endpoint accepts an optional `market` query parameter.
+
+```bash
+# User profile
+curl -H "x-api-key: YOUR_API_KEY" \
+  https://exchange.jamesxu.dev/api/v1/user
+
+# Open positions
+curl -H "x-api-key: YOUR_API_KEY" \
+  https://exchange.jamesxu.dev/api/v1/positions
+
+# Open orders filtered by market
+curl -H "x-api-key: YOUR_API_KEY" \
+  'https://exchange.jamesxu.dev/api/v1/open-orders?market=BTC-USD'
+```
+
+## Submit an order
+
+<CodeGroup>
+
+```bash curl
+curl -X POST \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/orders \
+  -d '{"market":"BTC-USD","side":"BUY","price":100,"quantity":2}'
+```
+
+```javascript JavaScript
+const response = await fetch("https://exchange.jamesxu.dev/api/v1/orders", {
+  method: "POST",
+  headers: {
+    "content-type": "application/json",
+    "x-api-key": process.env.EXCHANGE_API_KEY,
+  },
+  body: JSON.stringify({
+    market: "BTC-USD",
+    side: "BUY",
+    price: 100,
+    quantity: 2,
+  }),
+});
+
+if (!response.ok) {
+  throw new Error(await response.text());
+}
+
+const payload = await response.json();
+console.log(payload);
+```
+
+</CodeGroup>
+
+Example response:
+
+```json
+{
+  "order": {
+    "id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+    "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+    "market": "BTC-USD",
+    "side": "BUY",
+    "price": 100,
+    "quantity": 2,
+    "remaining": 2,
+    "created_at": "2026-03-18T15:28:01.342510Z"
+  },
+  "fills": [],
+  "resting": true
+}
+```
+
+<Note>
+  Sell orders can be submitted from flat inventory. Risk is enforced on worst-case net exposure: the sum of all open orders plus current net position must remain within `+/-1000` per market.
+</Note>
+
+## Amend an order
+
+Send a `PATCH` with the new `remaining` quantity. The order must still be open and belong to the authenticated trader.
+
+```bash
+curl -X PATCH \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/orders/ORDER_ID \
+  -d '{"remaining":1}'
+```
+
+## Cancel an order
+
+```bash
+curl -X DELETE \
+  -H "x-api-key: YOUR_API_KEY" \
+  https://exchange.jamesxu.dev/api/v1/orders/ORDER_ID
+```
+
+## Create a market (admin)
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/admin/markets \
+  -d '{
+    "market_id": "BTC-USD",
+    "display_name": "Bitcoin",
+    "base_asset": "BTC",
+    "quote_asset": "USD",
+    "tick_size": 1,
+    "min_order_quantity": 1,
+    "reference_price": 100,
+    "enabled": true
+  }'
+```
+
+## Settle a market (admin)
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD/settle \
+  -d '{"settlement_price":150}'
+```
+
+<Note>
+  `settlement_price` is the true value for one share. Settlement realizes PnL against each trader's signed net position and then flattens all positions to zero. All resting orders in the market are cancelled before settlement.
+</Note>
+
+## WebSocket session
+
+The full WebSocket workflow has five stages: connect, authenticate, subscribe, handle messages, and trade.
+
+<CodeGroup>
+
+```javascript JavaScript
+const socket = new WebSocket("wss://exchange.jamesxu.dev/ws");
+
+// 1. Authenticate and subscribe once the connection is open
+socket.addEventListener("open", () => {
+  // 2. Authenticate
+  socket.send(JSON.stringify({
+    op: "authenticate",
+    api_key: process.env.EXCHANGE_API_KEY,
+  }));
+
+  // 3. Subscribe to L3 market data
+  socket.send(JSON.stringify({
+    op: "subscribe",
+    channel: "l3",
+    market: "BTC-USD",
+    last_sequence: null,
+  }));
+});
+
+// 4. Handle incoming messages
+socket.addEventListener("message", (event) => {
+  const msg = JSON.parse(event.data);
+
+  switch (msg.type) {
+    case "heartbeat":
+      // {"type":"heartbeat"}
+      break;
+
+    case "authenticated":
+      // {"type":"authenticated","trader_id":"9d64e278-...","username":"team-alpha"}
+      console.log("Authenticated as", msg.username);
+      break;
+
+    case "snapshot":
+      // {
+      //   "type": "snapshot", "channel": "l3", "market": "BTC-USD",
+      //   "sequence": 0, "bids": [], "asks": []
+      // }
+      console.log("Order book snapshot", msg.bids, msg.asks);
+
+      // 5. Submit an order via WebSocket after receiving the initial snapshot
+      socket.send(JSON.stringify({
+        op: "submit_order",
+        request_id: "req-1",
+        market: "BTC-USD",
+        side: "BUY",
+        price: 100,
+        quantity: 2,
+      }));
+      break;
+
+    case "delta":
+      // {
+      //   "type": "delta", "channel": "l3", "market": "BTC-USD",
+      //   "sequence": 1,
+      //   "events": [{"kind":"order_added","order":{"order_id":"...","side":"BUY","price":100,"remaining":2,"created_at":"..."}}]
+      // }
+      console.log("Book delta", msg.events);
+      break;
+
+    case "fill":
+      // {
+      //   "type": "fill",
+      //   "fill": {
+      //     "fill_id": "fef1b4fd-...", "market": "BTC-USD",
+      //     "maker_order_id": "4d6c28f4-...", "taker_order_id": "66377526-...",
+      //     "price": 100, "quantity": 1, "occurred_at": "2026-03-18T15:28:04.132958Z"
+      //   }
+      // }
+      console.log("Fill", msg.fill);
+      break;
+
+    case "order_state":
+      // {
+      //   "type": "order_state",
+      //   "order": {"id":"66377526-...","trader_id":"9d64e278-...","market":"BTC-USD",
+      //             "side":"BUY","price":100,"quantity":2,"remaining":1,"created_at":"..."},
+      //   "status": "open"
+      // }
+      console.log("Order state", msg.order, msg.status);
+      break;
+
+    case "resync_required":
+      // Resubscribe to get a fresh snapshot
+      socket.send(JSON.stringify({
+        op: "subscribe",
+        channel: "l3",
+        market: msg.market,
+        last_sequence: null,
+      }));
+      break;
+  }
+});
+```
+
+```python Python
+import asyncio
+import json
+import os
+import websockets
+
+EXCHANGE_API_KEY = os.environ["EXCHANGE_API_KEY"]
+
+async def main():
+    uri = "wss://exchange.jamesxu.dev/ws"
+    async with websockets.connect(uri) as ws:
+        # 2. Authenticate
+        await ws.send(json.dumps({
+            "op": "authenticate",
+            "api_key": EXCHANGE_API_KEY,
+        }))
+
+        # 3. Subscribe to L3 market data
+        await ws.send(json.dumps({
+            "op": "subscribe",
+            "channel": "l3",
+            "market": "BTC-USD",
+            "last_sequence": None,
+        }))
+
+        order_submitted = False
+
+        # 4. Handle incoming messages
+        async for raw in ws:
+            msg = json.loads(raw)
+            msg_type = msg.get("type")
+
+            if msg_type == "heartbeat":
+                pass
+
+            elif msg_type == "authenticated":
+                print("Authenticated as", msg["username"])
+
+            elif msg_type == "snapshot":
+                print("Order book snapshot", msg["bids"], msg["asks"])
+
+                # 5. Submit an order via WebSocket after receiving the initial snapshot
+                if not order_submitted:
+                    await ws.send(json.dumps({
+                        "op": "submit_order",
+                        "request_id": "req-1",
+                        "market": "BTC-USD",
+                        "side": "BUY",
+                        "price": 100,
+                        "quantity": 2,
+                    }))
+                    order_submitted = True
+
+            elif msg_type == "delta":
+                print("Book delta", msg["events"])
+
+            elif msg_type == "fill":
+                print("Fill", msg["fill"])
+
+            elif msg_type == "order_state":
+                print("Order state", msg["order"], msg["status"])
+
+            elif msg_type == "resync_required":
+                # Resubscribe to get a fresh snapshot
+                await ws.send(json.dumps({
+                    "op": "subscribe",
+                    "channel": "l3",
+                    "market": msg["market"],
+                    "last_sequence": None,
+                }))
+
+asyncio.run(main())
+```
+
+</CodeGroup>
+
+<Note>
+  The server supports one `l3` subscription per connection. If the client falls behind by more than the buffer allows, the server sends `resync_required` and the client must resubscribe to receive a fresh snapshot.
+</Note>

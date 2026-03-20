@@ -1,97 +1,78 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Exchange API"
+description: "High-performance REST and WebSocket trading APIs for market data, order entry, and operator control."
 ---
 
-## Setting up
-
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Make your first API call in under 5 minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="REST API" icon="code" href="/guides/rest-api">
+    Full reference for all REST endpoints and request/response schemas.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="WebSocket API" icon="plug" href="/guides/websocket-api">
+    Real-time L3 market data, order entry, and user events over WebSocket.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Authentication" icon="key" href="/guides/authentication">
+    API keys, admin bearer tokens, and WebSocket session auth.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Platform overview
 
-Everything you need to create world-class documentation.
+Exchange is a Rust-based trading platform providing REST and WebSocket APIs for competition-style trading events. Operators provision traders, configure markets, and control the exchange lifecycle. Traders submit limit orders, view their positions and fills, and subscribe to live orderbook data.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+| Protocol | Base URL |
+| --- | --- |
+| REST | `https://exchange.jamesxu.dev` |
+| WebSocket | `wss://exchange.jamesxu.dev/ws` |
+| OpenAPI / Swagger | `https://exchange.jamesxu.dev/docs` |
 
-## Need inspiration?
+## Core capabilities
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<CardGroup cols={3}>
+  <Card title="Order entry" icon="arrow-right-arrow-left">
+    Submit, amend, and cancel limit orders via REST or WebSocket with sub-millisecond matching.
+  </Card>
+  <Card title="Live market data" icon="chart-line">
+    Subscribe to L3 orderbook snapshots and sequenced deltas — every add, fill, and cancel.
+  </Card>
+  <Card title="Account state" icon="wallet">
+    Query open orders, fills, net positions, and realized PnL across all markets.
+  </Card>
+  <Card title="Operator control" icon="sliders">
+    Start/stop trading, create and settle markets, provision users, and broadcast messages.
+  </Card>
+  <Card title="Risk management" icon="shield">
+    Position-based risk enforcement with a per-market net limit of +/-1000 at order admission.
+  </Card>
+  <Card title="Durable persistence" icon="database">
+    PostgreSQL-backed writes with in-memory cache, background batch flushing, and startup recovery.
+  </Card>
+</CardGroup>
+
+## Getting started
+
+<Steps>
+  <Step title="Get your API key">
+    An operator provisions your trader account and sends you your assigned API key.
+  </Step>
+  <Step title="Check available markets">
+    ```bash
+    curl https://exchange.jamesxu.dev/api/v1/markets
+    ```
+  </Step>
+  <Step title="Submit your first order">
+    ```bash
+    curl -X POST \
+      -H "x-api-key: YOUR_API_KEY" \
+      -H "content-type: application/json" \
+      https://exchange.jamesxu.dev/api/v1/orders \
+      -d '{"market":"BTC-USD","side":"BUY","price":100,"quantity":2}'
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  See the [Quickstart](/quickstart) for a full walkthrough including WebSocket connection and live market data.
+</Note>

@@ -1,0 +1,48 @@
+---
+title: "API Reference Overview"
+description: "Live OpenAPI schema, Swagger UI, and links to the human-readable API guides."
+---
+
+The Exchange API exposes both a machine-readable OpenAPI schema and an interactive Swagger UI.
+
+<Note>
+  The live OpenAPI schema is always in sync with the running service. Fetch it directly at `https://exchange.jamesxu.dev/api-doc/openapi.json` to generate client code, run contract tests, or import into any OpenAPI-compatible toolchain.
+</Note>
+
+## Base URL
+
+```text
+https://exchange.jamesxu.dev
+```
+
+## OpenAPI schema and Swagger UI
+
+| Resource | URL |
+| --- | --- |
+| OpenAPI JSON | `https://exchange.jamesxu.dev/api-doc/openapi.json` |
+| Swagger UI | `https://exchange.jamesxu.dev/docs` |
+
+The Swagger UI lists every endpoint with its full request and response schemas, enumerates all error codes, and lets you send live requests directly from the browser.
+
+## API guides
+
+The guides below document the same surface in human-readable form, with explanations, behavioral notes, and concrete examples.
+
+<CardGroup cols={2}>
+  <Card title="REST API" icon="webhook" href="/guides/rest-api">
+    All REST endpoints: health, markets, account reads, order entry, and admin control.
+  </Card>
+  <Card title="WebSocket API" icon="plug" href="/guides/websocket-api">
+    Socket protocol for authentication, L3 market data, trading, and user events.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/guides/authentication">
+    Trader `x-api-key` headers and admin bearer tokens.
+  </Card>
+  <Card title="Error codes" icon="circle-x" href="/guides/error-codes">
+    Structured error responses and rejection codes for REST and WebSocket.
+  </Card>
+</CardGroup>
+
+## Examples
+
+For end-to-end curl, JavaScript, and Python examples covering provisioning, order management, and WebSocket sessions, see the [Examples](/guides/examples) page.

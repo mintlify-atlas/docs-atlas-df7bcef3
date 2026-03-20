@@ -1,0 +1,472 @@
+---
+title: "WebSocket API"
+description: "Real-time market data, order entry, and user events over WebSocket."
+---
+
+## Connection
+
+Connect to the WebSocket endpoint:
+
+```text
+wss://exchange.jamesxu.dev/ws
+```
+
+Once connected, the server begins sending `heartbeat` messages every 15 seconds. The connection supports one L3 market subscription at a time. Trading and user-event messages share the same socket once you authenticate.
+
+<Note>
+You can subscribe to market data and trade on the same connection. Authenticate first, then subscribe to a market.
+</Note>
+
+---
+
+<Tabs>
+  <Tab title="Client messages">
+
+### authenticate
+
+Send your API key to identify yourself. On success the server replies with `authenticated`.
+
+```json
+{"op":"authenticate","api_key":"YOUR_API_KEY"}
+```
+
+<ParamField body="op" type="string" required>
+  Must be `"authenticate"`.
+</ParamField>
+
+<ParamField body="api_key" type="string" required>
+  Your trader API key.
+</ParamField>
+
+---
+
+### subscribe
+
+Subscribe to the L3 order book for a market. The server replies immediately with a `snapshot`, then streams `delta` messages.
+
+```json
+{"op":"subscribe","channel":"l3","market":"BTC-USD","last_sequence":null}
+```
+
+<ParamField body="op" type="string" required>
+  Must be `"subscribe"`.
+</ParamField>
+
+<ParamField body="channel" type="string" required>
+  Must be `"l3"`. No other channels are currently supported.
+</ParamField>
+
+<ParamField body="market" type="string" required>
+  Market identifier, e.g. `"BTC-USD"`.
+</ParamField>
+
+<ParamField body="last_sequence" type="number">
+  Supported by the protocol shape, but the current server flow always returns a full snapshot regardless of this value. Pass `null` or omit the field.
+</ParamField>
+
+---
+
+### unsubscribe
+
+Stop receiving updates for a market.
+
+```json
+{"op":"unsubscribe","channel":"l3","market":"BTC-USD"}
+```
+
+<ParamField body="op" type="string" required>
+  Must be `"unsubscribe"`.
+</ParamField>
+
+<ParamField body="channel" type="string" required>
+  Must be `"l3"`.
+</ParamField>
+
+<ParamField body="market" type="string" required>
+  Market identifier to unsubscribe from.
+</ParamField>
+
+---
+
+### submit_order
+
+Place a limit order. Requires authentication. The server replies with `ack` on success or `reject` on failure.
+
+```json
+{
+  "op": "submit_order",
+  "request_id": "req-1",
+  "market": "BTC-USD",
+  "side": "BUY",
+  "price": 100,
+  "quantity": 2
+}
+```
+
+<ParamField body="op" type="string" required>
+  Must be `"submit_order"`.
+</ParamField>
+
+<ParamField body="request_id" type="string">
+  Client-assigned identifier echoed back in the `ack` or `reject`. Useful for correlating responses to requests.
+</ParamField>
+
+<ParamField body="market" type="string" required>
+  Market identifier, e.g. `"BTC-USD"`.
+</ParamField>
+
+<ParamField body="side" type="string" required>
+  `"BUY"` or `"SELL"`.
+</ParamField>
+
+<ParamField body="price" type="number" required>
+  Limit price in integer units (subject to the market's tick size).
+</ParamField>
+
+<ParamField body="quantity" type="number" required>
+  Order quantity (subject to the market's minimum order quantity).
+</ParamField>
+
+---
+
+### cancel_order
+
+Cancel an open order you own. Requires authentication.
+
+```json
+{
+  "op": "cancel_order",
+  "request_id": "req-2",
+  "order_id": "66377526-7b98-485a-8c40-7024e68fa3c5"
+}
+```
+
+<ParamField body="op" type="string" required>
+  Must be `"cancel_order"`.
+</ParamField>
+
+<ParamField body="request_id" type="string">
+  Client-assigned correlation identifier.
+</ParamField>
+
+<ParamField body="order_id" type="string" required>
+  UUID of the order to cancel.
+</ParamField>
+
+---
+
+### amend_order
+
+Reduce the remaining quantity of an open order you own. Requires authentication.
+
+```json
+{
+  "op": "amend_order",
+  "request_id": "req-3",
+  "order_id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+  "remaining": 1
+}
+```
+
+<ParamField body="op" type="string" required>
+  Must be `"amend_order"`.
+</ParamField>
+
+<ParamField body="request_id" type="string">
+  Client-assigned correlation identifier.
+</ParamField>
+
+<ParamField body="order_id" type="string" required>
+  UUID of the order to amend.
+</ParamField>
+
+<ParamField body="remaining" type="number" required>
+  New remaining quantity. Must be less than the current remaining quantity.
+</ParamField>
+
+  </Tab>
+  <Tab title="Server messages">
+
+### heartbeat
+
+Sent by the server every 15 seconds. No action required.
+
+```json
+{"type":"heartbeat"}
+```
+
+---
+
+### authenticated
+
+Sent after a successful `authenticate` message.
+
+```json
+{
+  "type": "authenticated",
+  "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+  "username": "team-alpha"
+}
+```
+
+<ParamField body="trader_id" type="string">
+  UUID identifying your trader account.
+</ParamField>
+
+<ParamField body="username" type="string">
+  Your account username.
+</ParamField>
+
+---
+
+### snapshot
+
+Sent immediately after a `subscribe`. Contains the full L3 order book state at the given sequence number. Subsequent `delta` messages build on top of this sequence.
+
+```json
+{
+  "type": "snapshot",
+  "channel": "l3",
+  "market": "BTC-USD",
+  "sequence": 0,
+  "bids": [],
+  "asks": []
+}
+```
+
+<ParamField body="sequence" type="number">
+  The sequence number of this snapshot. The next expected delta will have `sequence + 1`.
+</ParamField>
+
+<ParamField body="bids" type="array">
+  Array of resting bid orders. Each entry includes `order_id`, `side`, `price`, `remaining`, and `created_at`.
+</ParamField>
+
+<ParamField body="asks" type="array">
+  Array of resting ask orders. Same shape as `bids`.
+</ParamField>
+
+---
+
+### delta
+
+A sequenced update to the order book. Each delta carries one or more events describing changes since the previous sequence number.
+
+```json
+{
+  "type": "delta",
+  "channel": "l3",
+  "market": "BTC-USD",
+  "sequence": 1,
+  "events": [
+    {
+      "kind": "order_added",
+      "order": {
+        "order_id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+        "side": "BUY",
+        "price": 100,
+        "remaining": 2,
+        "created_at": "2026-03-18T15:28:01.342510Z"
+      }
+    }
+  ]
+}
+```
+
+<ParamField body="sequence" type="number">
+  Monotonically increasing sequence number. If you receive a delta where `sequence` is not exactly `previous_sequence + 1`, a gap has occurred — see [Recovery and Resync](/guides/recovery-and-resync).
+</ParamField>
+
+<ParamField body="events" type="array">
+  One or more book change events. Each event has a `kind` field:
+
+  - `order_added` — a new order joined the book
+  - `order_filled` — an order was partially or fully filled
+  - `order_cancelled` — an order was removed from the book
+</ParamField>
+
+<Note>
+If you receive a delta whose sequence is not contiguous with the last seen sequence, discard your local book and resubscribe to get a fresh snapshot.
+</Note>
+
+---
+
+### ack
+
+Confirms that a trading operation was accepted.
+
+```json
+{"type":"ack","op":"submit_order","request_id":"req-1"}
+```
+
+<ParamField body="op" type="string">
+  The operation that was acknowledged: `"submit_order"`, `"cancel_order"`, or `"amend_order"`.
+</ParamField>
+
+<ParamField body="request_id" type="string">
+  The `request_id` you supplied in the client message, if any.
+</ParamField>
+
+---
+
+### reject
+
+Returned when a trading operation fails validation or is rejected by the engine.
+
+```json
+{
+  "type": "reject",
+  "op": "submit_order",
+  "request_id": "req-1",
+  "code": "position_limit_exceeded",
+  "message": "projected net position for BTC-USD would be 1005; limit is +/-1000"
+}
+```
+
+<ParamField body="op" type="string">
+  The operation that was rejected.
+</ParamField>
+
+<ParamField body="request_id" type="string">
+  The `request_id` you supplied in the client message, if any.
+</ParamField>
+
+<ParamField body="code" type="string">
+  Machine-readable error code. Common values include `position_limit_exceeded`, `order_not_found`, `market_disabled`, `unauthenticated`, and `tick_size_violation`.
+</ParamField>
+
+<ParamField body="message" type="string">
+  Human-readable description of the rejection reason.
+</ParamField>
+
+---
+
+### fill
+
+Sent to both the maker and taker when a trade executes. Only delivered to authenticated connections.
+
+```json
+{
+  "type": "fill",
+  "fill": {
+    "fill_id": "fef1b4fd-d0b0-4270-8831-b4c51aa43f1d",
+    "market": "BTC-USD",
+    "maker_order_id": "4d6c28f4-b349-4a4d-8927-8141c36eb6eb",
+    "taker_order_id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+    "price": 100,
+    "quantity": 1,
+    "occurred_at": "2026-03-18T15:28:04.132958Z"
+  }
+}
+```
+
+<ParamField body="fill_id" type="string">
+  UUID uniquely identifying this fill.
+</ParamField>
+
+<ParamField body="maker_order_id" type="string">
+  UUID of the resting order that provided liquidity.
+</ParamField>
+
+<ParamField body="taker_order_id" type="string">
+  UUID of the aggressing order that took liquidity.
+</ParamField>
+
+<ParamField body="price" type="number">
+  Price at which the trade executed.
+</ParamField>
+
+<ParamField body="quantity" type="number">
+  Quantity that traded.
+</ParamField>
+
+<ParamField body="occurred_at" type="string">
+  ISO 8601 timestamp of when the fill occurred.
+</ParamField>
+
+---
+
+### order_state
+
+Sent to the owning trader whenever an order's status changes (open, amended, filled, cancelled).
+
+```json
+{
+  "type": "order_state",
+  "order": {
+    "id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+    "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+    "market": "BTC-USD",
+    "side": "BUY",
+    "price": 100,
+    "quantity": 2,
+    "remaining": 1,
+    "created_at": "2026-03-18T15:28:01.342510Z"
+  },
+  "status": "open"
+}
+```
+
+<ParamField body="status" type="string">
+  Current order status: `"open"`, `"filled"`, or `"canceled"`.
+</ParamField>
+
+---
+
+### admin_message
+
+Broadcast by operators to one or all authenticated traders.
+
+```json
+{
+  "type": "admin_message",
+  "message": {
+    "message_id": "26aa26f5-8d20-4a6c-9b66-99549585036f",
+    "target_username": null,
+    "market": "BTC-USD",
+    "level": "info",
+    "title": "Desk notice",
+    "body": "Trading will stop in five minutes.",
+    "created_at": "2026-03-18T16:05:00.000000Z"
+  }
+}
+```
+
+<ParamField body="level" type="string">
+  Severity of the message: `"info"`, `"warning"`, or `"error"`.
+</ParamField>
+
+<ParamField body="target_username" type="string">
+  If non-null, this message was sent to a specific trader. If null, it is a broadcast to all authenticated connections.
+</ParamField>
+
+---
+
+### resync_required
+
+Sent when the server detects that your local book state may be stale — either because a sequence gap was detected or because your connection fell behind the broadcast buffer.
+
+```json
+{
+  "type": "resync_required",
+  "channel": "l3",
+  "market": "BTC-USD",
+  "expected_sequence": 5,
+  "current_sequence": 9,
+  "reason": "market data lagged by 3 messages; resubscribe for a fresh snapshot"
+}
+```
+
+See [Recovery and Resync](/guides/recovery-and-resync) for the recommended recovery flow.
+
+  </Tab>
+</Tabs>
+
+---
+
+## Current limitations
+
+- One L3 market subscription per connection. To track multiple markets simultaneously, open one connection per market.
+- No replay endpoint. If you miss messages, you must resubscribe from a fresh snapshot.
+- No persisted user-event sequence numbers. User events do not carry a sequence number and cannot be replayed.
+- Only the `l3` channel is supported. No trades-only or ticker channels are available.

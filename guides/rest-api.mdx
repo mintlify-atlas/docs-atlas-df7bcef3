@@ -1,0 +1,703 @@
+---
+title: "REST API"
+description: "Complete reference for all REST endpoints — health, markets, account state, order entry, and admin control."
+---
+
+All requests go to the base URL: `https://exchange.jamesxu.dev`
+
+A machine-readable OpenAPI schema and Swagger UI are also available:
+
+```text
+https://exchange.jamesxu.dev/api-doc/openapi.json
+https://exchange.jamesxu.dev/docs
+```
+
+## Public endpoints
+
+No authentication required.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Service and persistence health |
+| `GET` | `/api/v1/markets` | List configured markets |
+
+<AccordionGroup>
+  <Accordion title="GET /health">
+    Returns the service status and current persistence state. No authentication required.
+
+    **Response fields**
+
+    <ResponseField name="status" type="string" required>
+      `ok` when persistence is `disabled` or `ok`. `degraded` when persistence is `retrying`, `backpressured`, or `stopped`.
+    </ResponseField>
+    <ResponseField name="service" type="string" required>
+      Always `exchange`.
+    </ResponseField>
+    <ResponseField name="now" type="string" required>
+      Current server time in RFC 3339 format.
+    </ResponseField>
+    <ResponseField name="persistence" type="object" required>
+      Current persistence status including mode.
+    </ResponseField>
+
+    ```bash
+    curl https://exchange.jamesxu.dev/health
+    ```
+
+    ```json
+    {
+      "status": "ok",
+      "service": "exchange",
+      "now": "2026-03-18T15:27:00.000000Z",
+      "persistence": { "mode": "ok" }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="GET /api/v1/markets">
+    Returns the list of all configured markets. No authentication required.
+
+    ```bash
+    curl https://exchange.jamesxu.dev/api/v1/markets
+    ```
+
+    ```json
+    [
+      {
+        "market_id": "BTC-USD",
+        "display_name": "Bitcoin",
+        "base_asset": "BTC",
+        "quote_asset": "USD",
+        "tick_size": 1,
+        "min_order_quantity": 1,
+        "reference_price": 100,
+        "settlement_price": null,
+        "status": "enabled",
+        "created_at": "2026-03-18T15:00:00.000000Z",
+        "updated_at": "2026-03-18T15:00:00.000000Z"
+      }
+    ]
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+<Tabs>
+  <Tab title="Trader endpoints">
+
+    Trader routes require the `x-api-key` header. API keys are provisioned by an admin and are prefixed with `exch_`.
+
+    ```bash
+    x-api-key: exch_1d4208be6fa84b8cb0a2e5cfa9508d5f
+    ```
+
+    | Method | Path | Purpose |
+    | --- | --- | --- |
+    | `GET` | `/api/v1/user` | Authenticated user profile |
+    | `GET` | `/api/v1/positions` | User positions across markets |
+    | `GET` | `/api/v1/portfolio` | Portfolio snapshot with PnL |
+    | `GET` | `/api/v1/leaderboard` | Leaderboard ranked by marked net PnL |
+    | `GET` | `/api/v1/open-orders` | Open orders, optional `?market=` filter |
+    | `GET` | `/api/v1/fills` | Fills, optional `?market=` filter |
+    | `POST` | `/api/v1/orders` | Submit a limit order |
+    | `PATCH` | `/api/v1/orders/{order_id}` | Amend remaining quantity |
+    | `DELETE` | `/api/v1/orders/{order_id}` | Cancel an order |
+
+    <AccordionGroup>
+      <Accordion title="GET /api/v1/user">
+        Returns the authenticated trader's profile.
+
+        ```bash
+        curl \
+          -H "x-api-key: YOUR_API_KEY" \
+          https://exchange.jamesxu.dev/api/v1/user
+        ```
+
+        ```json
+        {
+          "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+          "username": "team-alpha",
+          "api_key": "exch_1d4208be6fa84b8cb0a2e5cfa9508d5f",
+          "created_at": "2026-03-18T15:27:42.159901Z"
+        }
+        ```
+      </Accordion>
+
+      <Accordion title="GET /api/v1/positions">
+        Returns all open positions for the authenticated trader.
+
+        ```bash
+        curl \
+          -H "x-api-key: YOUR_API_KEY" \
+          https://exchange.jamesxu.dev/api/v1/positions
+        ```
+
+        ```json
+        [
+          {
+            "market": "BTC-USD",
+            "net_quantity": 5,
+            "average_entry_price": 98,
+            "realized_pnl": 50,
+            "updated_at": "2026-03-18T15:30:00.000000Z"
+          }
+        ]
+        ```
+
+        - `net_quantity` is a signed integer. Positive values are long, negative values are short.
+        - `realized_pnl` accumulates as fills close or reduce the position.
+      </Accordion>
+
+      <Accordion title="GET /api/v1/portfolio">
+        Returns a portfolio snapshot including position limit and all current positions.
+
+        ```bash
+        curl \
+          -H "x-api-key: YOUR_API_KEY" \
+          https://exchange.jamesxu.dev/api/v1/portfolio
+        ```
+
+        ```json
+        {
+          "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+          "position_limit": 1000,
+          "positions": [
+            {
+              "market": "BTC-USD",
+              "net_quantity": 5,
+              "average_entry_price": 98,
+              "realized_pnl": 50,
+              "updated_at": "2026-03-18T15:30:00.000000Z"
+            }
+          ]
+        }
+        ```
+
+        `position_limit` reflects the exchange-wide per-market net position limit of **+/-1000**.
+      </Accordion>
+
+      <Accordion title="GET /api/v1/leaderboard">
+        Returns traders ranked by their current marked net PnL. Marking uses settled prices, orderbook mid prices, or market reference prices.
+
+        ```bash
+        curl \
+          -H "x-api-key: YOUR_API_KEY" \
+          https://exchange.jamesxu.dev/api/v1/leaderboard
+        ```
+      </Accordion>
+
+      <Accordion title="GET /api/v1/open-orders">
+        Returns all resting open orders for the authenticated trader. Filter by market using the optional `market` query parameter.
+
+        **Query parameters**
+
+        <ParamField path="query.market" type="string">
+          Optional. Filter results to a single market, e.g. `BTC-USD`.
+        </ParamField>
+
+        ```bash
+        curl \
+          -H "x-api-key: YOUR_API_KEY" \
+          "https://exchange.jamesxu.dev/api/v1/open-orders?market=BTC-USD"
+        ```
+
+        ```json
+        [
+          {
+            "id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+            "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+            "market": "BTC-USD",
+            "side": "BUY",
+            "price": 100,
+            "quantity": 2,
+            "remaining": 2,
+            "created_at": "2026-03-18T15:28:01.342510Z"
+          }
+        ]
+        ```
+      </Accordion>
+
+      <Accordion title="GET /api/v1/fills">
+        Returns all fills for the authenticated trader. Filter by market using the optional `market` query parameter.
+
+        **Query parameters**
+
+        <ParamField path="query.market" type="string">
+          Optional. Filter results to a single market, e.g. `BTC-USD`.
+        </ParamField>
+
+        ```bash
+        curl \
+          -H "x-api-key: YOUR_API_KEY" \
+          "https://exchange.jamesxu.dev/api/v1/fills?market=BTC-USD"
+        ```
+
+        ```json
+        [
+          {
+            "fill_id": "a1b2c3d4-0000-0000-0000-000000000001",
+            "market": "BTC-USD",
+            "maker_order_id": "aaa00000-0000-0000-0000-000000000001",
+            "taker_order_id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+            "price": 100,
+            "quantity": 2,
+            "occurred_at": "2026-03-18T15:29:10.000000Z"
+          }
+        ]
+        ```
+      </Accordion>
+
+      <Accordion title="POST /api/v1/orders">
+        Submits a limit order. Returns the order, any fills that occurred, and whether the order is resting in the book.
+
+        **Request body**
+
+        <ParamField path="body.market" type="string" required>
+          Market symbol, e.g. `BTC-USD`. Must follow the `BASE-QUOTE` format.
+        </ParamField>
+        <ParamField path="body.side" type="string" required>
+          `BUY` or `SELL`.
+        </ParamField>
+        <ParamField path="body.price" type="number" required>
+          Limit price. Must be greater than zero and align to the market's `tick_size`.
+        </ParamField>
+        <ParamField path="body.quantity" type="number" required>
+          Order quantity. Must be at least the market's `min_order_quantity`.
+        </ParamField>
+
+        **Response fields**
+
+        <ResponseField name="order" type="object" required>
+          The submitted order with its assigned `id` and current `remaining` quantity.
+        </ResponseField>
+        <ResponseField name="fills" type="array" required>
+          List of fills that occurred immediately on submission. Empty if the order rested.
+        </ResponseField>
+        <ResponseField name="resting" type="boolean" required>
+          `true` if the order has remaining quantity in the book after matching.
+        </ResponseField>
+
+        ```bash
+        curl \
+          -X POST \
+          -H "x-api-key: YOUR_API_KEY" \
+          -H "content-type: application/json" \
+          https://exchange.jamesxu.dev/api/v1/orders \
+          -d '{"market":"BTC-USD","side":"BUY","price":100,"quantity":2}'
+        ```
+
+        ```json
+        {
+          "order": {
+            "id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+            "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+            "market": "BTC-USD",
+            "side": "BUY",
+            "price": 100,
+            "quantity": 2,
+            "remaining": 2,
+            "created_at": "2026-03-18T15:28:01.342510Z"
+          },
+          "fills": [],
+          "resting": true
+        }
+        ```
+
+        <Warning>
+          Order admission checks worst-case net exposure from all resting open orders. A position limit of **+/-1000** applies per market. Exceeding this returns `409 Conflict`.
+        </Warning>
+      </Accordion>
+
+      <Accordion title="PATCH /api/v1/orders/{order_id}">
+        Amends the remaining quantity of a resting order. You can only reduce `remaining` — increasing it is not allowed.
+
+        **Path parameters**
+
+        <ParamField path="path.order_id" type="string" required>
+          UUID of the resting order to amend.
+        </ParamField>
+
+        **Request body**
+
+        <ParamField path="body.remaining" type="number" required>
+          New remaining quantity. Must be greater than zero and less than or equal to the current remaining.
+        </ParamField>
+
+        ```bash
+        curl \
+          -X PATCH \
+          -H "x-api-key: YOUR_API_KEY" \
+          -H "content-type: application/json" \
+          https://exchange.jamesxu.dev/api/v1/orders/ORDER_ID \
+          -d '{"remaining":1}'
+        ```
+
+        ```json
+        {
+          "order": {
+            "id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+            "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+            "market": "BTC-USD",
+            "side": "BUY",
+            "price": 100,
+            "quantity": 2,
+            "remaining": 1,
+            "created_at": "2026-03-18T15:28:01.342510Z"
+          }
+        }
+        ```
+      </Accordion>
+
+      <Accordion title="DELETE /api/v1/orders/{order_id}">
+        Cancels a resting order. Returns the canceled order.
+
+        **Path parameters**
+
+        <ParamField path="path.order_id" type="string" required>
+          UUID of the order to cancel.
+        </ParamField>
+
+        ```bash
+        curl \
+          -X DELETE \
+          -H "x-api-key: YOUR_API_KEY" \
+          https://exchange.jamesxu.dev/api/v1/orders/ORDER_ID
+        ```
+
+        ```json
+        {
+          "order": {
+            "id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+            "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+            "market": "BTC-USD",
+            "side": "BUY",
+            "price": 100,
+            "quantity": 2,
+            "remaining": 2,
+            "created_at": "2026-03-18T15:28:01.342510Z"
+          }
+        }
+        ```
+      </Accordion>
+    </AccordionGroup>
+
+  </Tab>
+
+  <Tab title="Admin endpoints">
+
+    Admin routes require a `Bearer` token in the `Authorization` header.
+
+    ```bash
+    Authorization: Bearer ADMIN_API_TOKEN
+    ```
+
+    | Method | Path | Purpose |
+    | --- | --- | --- |
+    | `POST` | `/api/v1/admin/users` | Provision a competition user |
+    | `GET` | `/api/v1/admin/state` | Current controls, markets, messages, and persistence |
+    | `POST` | `/api/v1/admin/trading/start` | Enable trading submissions |
+    | `POST` | `/api/v1/admin/trading/stop` | Disable trading submissions |
+    | `GET` | `/api/v1/admin/markets` | List markets |
+    | `POST` | `/api/v1/admin/markets` | Create or replace a market |
+    | `PATCH` | `/api/v1/admin/markets/{market_id}` | Update market status or limits |
+    | `DELETE` | `/api/v1/admin/markets/{market_id}` | Delete a market with no open orders |
+    | `POST` | `/api/v1/admin/markets/{market_id}/settle` | Settle a market at a given price |
+    | `POST` | `/api/v1/admin/config/load` | Bulk-load exchange config and market definitions |
+    | `GET` | `/api/v1/admin/messages` | Recent admin messages |
+    | `POST` | `/api/v1/admin/messages` | Send a broadcast or user-targeted admin message |
+    | `POST` | `/api/v1/admin/users/reset` | Clear all user positions, orders, and fills |
+    | `GET` | `/api/v1/admin/leaderboard` | Leaderboard snapshot |
+
+    <AccordionGroup>
+      <Accordion title="POST /api/v1/admin/users">
+        Provisions a new competition user and returns their profile including the assigned API key.
+
+        **Request body**
+
+        <ParamField path="body.username" type="string" required>
+          Unique username for the new trader. Must not be empty.
+        </ParamField>
+
+        **Response fields**
+
+        <ResponseField name="profile" type="object" required>
+          <Expandable title="properties">
+            <ResponseField name="trader_id" type="string">UUID assigned to the trader.</ResponseField>
+            <ResponseField name="username" type="string">The provisioned username.</ResponseField>
+            <ResponseField name="api_key" type="string">API key prefixed with `exch_`. Share this with the trader.</ResponseField>
+            <ResponseField name="created_at" type="string">ISO 8601 creation timestamp.</ResponseField>
+          </Expandable>
+        </ResponseField>
+
+        ```bash
+        curl \
+          -X POST \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          -H "content-type: application/json" \
+          https://exchange.jamesxu.dev/api/v1/admin/users \
+          -d '{"username":"team-alpha"}'
+        ```
+
+        ```json
+        {
+          "profile": {
+            "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+            "username": "team-alpha",
+            "api_key": "exch_1d4208be6fa84b8cb0a2e5cfa9508d5f",
+            "created_at": "2026-03-18T15:27:42.159901Z"
+          }
+        }
+        ```
+      </Accordion>
+
+      <Accordion title="GET /api/v1/admin/state">
+        Returns the current exchange state including trading controls, configured markets, recent admin messages, and persistence status.
+
+        ```bash
+        curl \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          https://exchange.jamesxu.dev/api/v1/admin/state
+        ```
+      </Accordion>
+
+      <Accordion title="POST /api/v1/admin/trading/start">
+        Enables order submissions exchange-wide. Traders can submit orders once this is set.
+
+        ```bash
+        curl \
+          -X POST \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          https://exchange.jamesxu.dev/api/v1/admin/trading/start
+        ```
+      </Accordion>
+
+      <Accordion title="POST /api/v1/admin/trading/stop">
+        Disables order submissions exchange-wide. All new order, amend, and cancel requests will be rejected until trading is re-enabled.
+
+        ```bash
+        curl \
+          -X POST \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          https://exchange.jamesxu.dev/api/v1/admin/trading/stop
+        ```
+      </Accordion>
+
+      <Accordion title="GET /api/v1/admin/markets">
+        Returns all configured markets including full metadata and status.
+
+        ```bash
+        curl \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          https://exchange.jamesxu.dev/api/v1/admin/markets
+        ```
+      </Accordion>
+
+      <Accordion title="POST /api/v1/admin/markets">
+        Creates or replaces a market definition. If a market with the same `market_id` already exists, it is replaced.
+
+        **Request body**
+
+        <ParamField path="body.market_id" type="string" required>
+          Market symbol in `BASE-QUOTE` format, e.g. `BTC-USD`.
+        </ParamField>
+        <ParamField path="body.display_name" type="string" required>
+          Human-readable market name.
+        </ParamField>
+        <ParamField path="body.base_asset" type="string" required>
+          Base asset symbol.
+        </ParamField>
+        <ParamField path="body.quote_asset" type="string" required>
+          Quote asset symbol.
+        </ParamField>
+        <ParamField path="body.tick_size" type="number" required>
+          Minimum price increment. All order prices must be a multiple of this value.
+        </ParamField>
+        <ParamField path="body.min_order_quantity" type="number" required>
+          Minimum order quantity. Orders below this are rejected.
+        </ParamField>
+        <ParamField path="body.reference_price" type="number">
+          Optional reference price used for marking when no trades have occurred.
+        </ParamField>
+        <ParamField path="body.enabled" type="boolean">
+          Whether the market is open for trading on creation.
+        </ParamField>
+
+        ```bash
+        curl \
+          -X POST \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          -H "content-type: application/json" \
+          https://exchange.jamesxu.dev/api/v1/admin/markets \
+          -d '{
+            "market_id":"BTC-USD",
+            "display_name":"Bitcoin",
+            "base_asset":"BTC",
+            "quote_asset":"USD",
+            "tick_size":1,
+            "min_order_quantity":1,
+            "reference_price":100,
+            "enabled":true
+          }'
+        ```
+      </Accordion>
+
+      <Accordion title="PATCH /api/v1/admin/markets/{market_id}">
+        Updates a market's status or limits. Only fields provided in the request body are changed.
+
+        **Path parameters**
+
+        <ParamField path="path.market_id" type="string" required>
+          Market symbol, e.g. `BTC-USD`.
+        </ParamField>
+
+        ```bash
+        curl \
+          -X PATCH \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          -H "content-type: application/json" \
+          https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD \
+          -d '{"enabled":false}'
+        ```
+      </Accordion>
+
+      <Accordion title="DELETE /api/v1/admin/markets/{market_id}">
+        Deletes a market. The market must have no open orders.
+
+        **Path parameters**
+
+        <ParamField path="path.market_id" type="string" required>
+          Market symbol to delete.
+        </ParamField>
+
+        ```bash
+        curl \
+          -X DELETE \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD
+        ```
+      </Accordion>
+
+      <Accordion title="POST /api/v1/admin/markets/{market_id}/settle">
+        Settles a market. Cancels all resting orders, then closes every trader's net position at the supplied settlement price, realizing PnL. Positions are flattened to zero after settlement.
+
+        **Path parameters**
+
+        <ParamField path="path.market_id" type="string" required>
+          Market symbol to settle.
+        </ParamField>
+
+        **Request body**
+
+        <ParamField path="body.settlement_price" type="number" required>
+          The admin-determined true value per share. PnL is realized against each trader's signed net position at this price.
+        </ParamField>
+
+        ```bash
+        curl \
+          -X POST \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          -H "content-type: application/json" \
+          https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD/settle \
+          -d '{"settlement_price":150}'
+        ```
+      </Accordion>
+
+      <Accordion title="POST /api/v1/admin/config/load">
+        Bulk-loads exchange configuration and market definitions. Use this to initialize or replace the full exchange state in one call.
+
+        ```bash
+        curl \
+          -X POST \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          -H "content-type: application/json" \
+          https://exchange.jamesxu.dev/api/v1/admin/config/load \
+          -d '{"markets":[{"market_id":"BTC-USD","display_name":"Bitcoin","base_asset":"BTC","quote_asset":"USD","tick_size":1,"min_order_quantity":1,"reference_price":100,"enabled":true}]}'
+        ```
+      </Accordion>
+
+      <Accordion title="GET /api/v1/admin/messages">
+        Returns recent admin messages sent to traders.
+
+        ```bash
+        curl \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          https://exchange.jamesxu.dev/api/v1/admin/messages
+        ```
+      </Accordion>
+
+      <Accordion title="POST /api/v1/admin/messages">
+        Sends a broadcast or user-targeted admin message. Messages can be scoped to all traders or a specific username.
+
+        **Request body**
+
+        <ParamField path="body.target_username" type="string">
+          Optional. Username to send the message to. `null` broadcasts to all traders.
+        </ParamField>
+        <ParamField path="body.market" type="string">
+          Optional. Market context for the message.
+        </ParamField>
+        <ParamField path="body.level" type="string" required>
+          Severity level, e.g. `info`, `warning`.
+        </ParamField>
+        <ParamField path="body.title" type="string" required>
+          Short message title.
+        </ParamField>
+        <ParamField path="body.body" type="string" required>
+          Full message body.
+        </ParamField>
+
+        ```bash
+        curl \
+          -X POST \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          -H "content-type: application/json" \
+          https://exchange.jamesxu.dev/api/v1/admin/messages \
+          -d '{
+            "target_username": null,
+            "market": "BTC-USD",
+            "level": "info",
+            "title": "Desk notice",
+            "body": "Trading will stop in five minutes."
+          }'
+        ```
+      </Accordion>
+
+      <Accordion title="POST /api/v1/admin/users/reset">
+        Clears all user positions, open orders, and fills exchange-wide. This is a destructive operation intended for resetting between competition rounds.
+
+        <Warning>
+          This operation is irreversible. All trader positions, open orders, and fills are permanently deleted.
+        </Warning>
+
+        ```bash
+        curl \
+          -X POST \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          https://exchange.jamesxu.dev/api/v1/admin/users/reset
+        ```
+      </Accordion>
+
+      <Accordion title="GET /api/v1/admin/leaderboard">
+        Returns a leaderboard snapshot with all traders ranked by marked net PnL. Useful for competition scoring and monitoring.
+
+        ```bash
+        curl \
+          -H "Authorization: Bearer ADMIN_API_TOKEN" \
+          https://exchange.jamesxu.dev/api/v1/admin/leaderboard
+        ```
+      </Accordion>
+    </AccordionGroup>
+
+  </Tab>
+</Tabs>
+
+## Data model notes
+
+- `side` is `BUY` or `SELL`
+- `price`, `quantity`, and `remaining` are unsigned 64-bit integers (`u64`)
+- The per-market net position limit is **+/-1000**
+- Traders can sell from flat and go short; order admission is based on worst-case net exposure if all resting open orders were to execute
+- Realized PnL is tracked on positions; no pre-seeded inventory or cash balance is required to open a long or short position
+- Leaderboard ranking uses settled prices, orderbook marks, or market reference prices
+- Pagination is not yet implemented

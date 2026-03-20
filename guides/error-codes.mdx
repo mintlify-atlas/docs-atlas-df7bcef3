@@ -1,0 +1,120 @@
+---
+title: "Error Codes"
+description: "REST HTTP status codes and WebSocket error and reject codes."
+---
+
+## REST error shape
+
+All REST errors return a JSON body with a single `error` field:
+
+```json
+{
+  "error": "human readable message"
+}
+```
+
+## REST status codes
+
+| Status | Example causes |
+| --- | --- |
+| `400 Bad Request` | Invalid market symbol, invalid price, tick-size violation, invalid quantity, invalid amend, missing username |
+| `401 Unauthorized` | Missing `x-api-key`, invalid API key, missing `Authorization` header, invalid admin token |
+| `403 Forbidden` | Order exists but belongs to a different trader |
+| `404 Not Found` | Order not found, market not configured, target user not found |
+| `409 Conflict` | Projected position limit breach, trading disabled, market disabled, market settled, username already exists |
+| `429 Too Many Requests` | Per-user rate limit exceeded (100 ops/sec) |
+| `500 Internal Server Error` | Numeric overflow or other internal failure |
+
+<Warning>
+  A `409 Conflict` on order submission means your projected net position would exceed the **+/-1000** limit for that market. Check your open orders and current position before resubmitting.
+</Warning>
+
+Example error response:
+
+```json
+{
+  "error": "projected net position for BTC-USD would be 1005; limit is +/-1000"
+}
+```
+
+## WebSocket `error` messages
+
+`error` messages indicate protocol or transport-level problems. They are not tied to a specific trading operation.
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_message` | The message could not be parsed or is missing required fields |
+| `unsupported_channel` | Subscription requested for an unsupported channel |
+| `invalid_api_key` | The API key provided during WebSocket authentication is invalid |
+
+Example:
+
+```json
+{
+  "type": "error",
+  "code": "unsupported_channel",
+  "message": "only the l3 channel is supported"
+}
+```
+
+## WebSocket `reject` messages
+
+`reject` messages indicate a trading operation was refused. Each reject includes the original `op`, the `request_id` from your message, and a machine-readable `code`.
+
+| Code | Meaning |
+| --- | --- |
+| `unauthenticated` | Operation attempted before authenticating the WebSocket session |
+| `trading_disabled` | Exchange-wide trading has been stopped by an admin |
+| `invalid_market` | Market symbol format is invalid (must be `BASE-QUOTE`) |
+| `market_not_configured` | No market definition exists for the requested symbol |
+| `market_disabled` | Market exists but is currently disabled |
+| `market_settled` | Market has been settled and no longer accepts orders |
+| `invalid_price` | Price is zero or otherwise invalid |
+| `tick_size_violation` | Price is not a multiple of the market's tick size |
+| `invalid_quantity` | Quantity is zero or otherwise invalid |
+| `quantity_below_minimum` | Quantity is below the market's minimum order quantity |
+| `invalid_remaining` | Amend `remaining` is zero |
+| `invalid_amend` | Amend would increase remaining quantity, which is not allowed |
+| `order_not_found` | Order ID does not exist in the trader's open orders |
+| `order_not_owned` | Order exists but belongs to a different trader |
+| `position_limit_exceeded` | Projected net position after the order would exceed +/-1000 |
+| `overflow` | Numeric overflow during position or PnL calculation |
+
+Example:
+
+```json
+{
+  "type": "reject",
+  "op": "submit_order",
+  "request_id": "req-1",
+  "code": "position_limit_exceeded",
+  "message": "projected net position for BTC-USD would be 1005; limit is +/-1000"
+}
+```
+
+## Health degradation
+
+The `GET /health` endpoint reflects persistence state in the `status` field:
+
+| Persistence mode | `status` value |
+| --- | --- |
+| `disabled` | `ok` |
+| `ok` | `ok` |
+| `retrying` | `degraded` |
+| `backpressured` | `degraded` |
+| `stopped` | `degraded` |
+
+Example degraded response:
+
+```json
+{
+  "status": "degraded",
+  "service": "exchange",
+  "now": "2026-03-18T15:27:00.000000Z",
+  "persistence": { "mode": "retrying" }
+}
+```
+
+<Warning>
+  A `degraded` status means the persistence layer is not successfully writing. In-memory state is still live and the exchange continues to serve traffic, but data may not be durably stored.
+</Warning>

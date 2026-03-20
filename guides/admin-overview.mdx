@@ -1,0 +1,279 @@
+---
+title: "Admin Overview"
+description: "Operator guide for user provisioning, exchange control, and admin messaging."
+---
+
+Admin routes let operators provision traders, inspect exchange state, broadcast messages, and control trading globally. All admin endpoints require a bearer token configured at startup.
+
+## Admin authentication
+
+Every admin request must include the `ADMIN_API_TOKEN` value set at startup as a bearer token:
+
+```http
+Authorization: Bearer ADMIN_API_TOKEN
+```
+
+The token is read from the `ADMIN_API_TOKEN` environment variable when the exchange process starts. There is no way to rotate it without restarting the process.
+
+## User provisioning
+
+### Provision a trader
+
+Use `POST /api/v1/admin/users` to create a new competition trader. Each provisioned user receives a unique API key used for all subsequent trader-facing authentication.
+
+<Steps>
+  <Step title="Send the provision request">
+    ```bash
+    curl \
+      -X POST \
+      -H "Authorization: Bearer ADMIN_API_TOKEN" \
+      -H "content-type: application/json" \
+      https://exchange.jamesxu.dev/api/v1/admin/users \
+      -d '{"username":"team-alpha"}'
+    ```
+  </Step>
+  <Step title="Receive the trader profile">
+    The response includes the `trader_id`, `username`, generated `api_key`, and `created_at` timestamp:
+
+    ```json
+    {
+      "profile": {
+        "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+        "username": "team-alpha",
+        "api_key": "exch_1d4208be6fa84b8cb0a2e5cfa9508d5f",
+        "created_at": "2026-03-18T15:27:42.159901Z"
+      }
+    }
+    ```
+  </Step>
+  <Step title="Distribute the API key to the trader">
+    Share the `api_key` with the team. They use it in the `x-api-key` header for all REST requests and in the WebSocket `authenticate` message. Store it securely — it is not recoverable after provisioning.
+  </Step>
+</Steps>
+
+Usernames must be unique. Attempting to provision a second user with the same username returns `409 Conflict`.
+
+### Reset all users
+
+`POST /api/v1/admin/users/reset` clears all user positions, open orders, and fills. User accounts and API keys are preserved — only trading state is erased.
+
+<Warning>
+  This operation is irreversible. All positions, orders, and fill history are permanently deleted for every trader on the exchange. Use only in a controlled pre-competition reset or testing scenario.
+</Warning>
+
+```bash
+curl \
+  -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  https://exchange.jamesxu.dev/api/v1/admin/users/reset
+```
+
+Example response:
+
+```json
+{
+  "cleared_orders": 12,
+  "cleared_positions": 8,
+  "cleared_fills": 34
+}
+```
+
+Connected WebSocket clients receive a `resync_required` system event after the reset.
+
+## Exchange state inspection
+
+`GET /api/v1/admin/state` returns a full snapshot of the exchange: current trading controls, all market definitions, recent admin messages, and persistence backend status.
+
+```bash
+curl \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  https://exchange.jamesxu.dev/api/v1/admin/state
+```
+
+Example response shape:
+
+```json
+{
+  "controls": {
+    "trading_enabled": true,
+    "updated_at": "2026-03-18T15:00:00.000000Z"
+  },
+  "markets": [
+    {
+      "market_id": "BTC-USD",
+      "display_name": "Bitcoin",
+      "status": "enabled",
+      "tick_size": 1,
+      "min_order_quantity": 1,
+      "reference_price": 100
+    }
+  ],
+  "recent_messages": [],
+  "persistence": {
+    "backend": "postgres",
+    "healthy": true
+  }
+}
+```
+
+## Trading control
+
+Trading can be enabled or disabled globally. When trading is disabled, new order submissions are rejected. Orders that are already in-flight at the moment trading is stopped still process normally.
+
+### Start trading
+
+```bash
+curl \
+  -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  https://exchange.jamesxu.dev/api/v1/admin/trading/start
+```
+
+### Stop trading
+
+```bash
+curl \
+  -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  https://exchange.jamesxu.dev/api/v1/admin/trading/stop
+```
+
+Both endpoints return the updated `ExchangeControls` object:
+
+```json
+{
+  "controls": {
+    "trading_enabled": false,
+    "updated_at": "2026-03-18T15:30:00.000000Z"
+  }
+}
+```
+
+## Admin messages
+
+Admin messages can be broadcast to all connected traders or targeted at a specific username. Delivered messages appear as `admin_message` events on connected WebSocket clients.
+
+### Send a message
+
+`POST /api/v1/admin/messages` accepts the following fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `target_username` | `string \| null` | Target a specific trader by username, or `null` to broadcast to all. |
+| `market` | `string \| null` | Optional market context (e.g. `"BTC-USD"`). |
+| `level` | `string` | Severity: `info`, `warning`, or `critical`. |
+| `title` | `string \| null` | Optional short title for the message. |
+| `body` | `string` | Required message body. |
+
+**Broadcast to all traders:**
+
+```bash
+curl \
+  -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/admin/messages \
+  -d '{
+    "target_username": null,
+    "market": "BTC-USD",
+    "level": "info",
+    "title": "Desk notice",
+    "body": "Trading will stop in five minutes."
+  }'
+```
+
+**Target a specific trader:**
+
+```bash
+curl \
+  -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/admin/messages \
+  -d '{
+    "target_username": "team-alpha",
+    "market": null,
+    "level": "warning",
+    "title": "Risk alert",
+    "body": "Your position in BTC-USD is approaching the limit."
+  }'
+```
+
+Messages sent to a specific `target_username` are routed only to that trader's WebSocket session. Broadcast messages (where `target_username` is `null`) are delivered to all connected clients.
+
+### Retrieve recent messages
+
+```bash
+curl \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  https://exchange.jamesxu.dev/api/v1/admin/messages
+```
+
+Returns a list of recent `AdminMessageEntry` objects in reverse-chronological order.
+
+## Bulk config load
+
+`POST /api/v1/admin/config/load` applies a complete exchange configuration — trading controls and all market definitions — in a single call. This is the recommended way to initialise the exchange before a competition round.
+
+```bash
+curl \
+  -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/admin/config/load \
+  -d '{
+    "trading_enabled": false,
+    "markets": [
+      {
+        "market_id": "BTC-USD",
+        "display_name": "Bitcoin",
+        "base_asset": "BTC",
+        "quote_asset": "USD",
+        "tick_size": 1,
+        "min_order_quantity": 1,
+        "reference_price": 100,
+        "enabled": true
+      },
+      {
+        "market_id": "ETH-USD",
+        "display_name": "Ethereum",
+        "base_asset": "ETH",
+        "quote_asset": "USD",
+        "tick_size": 1,
+        "min_order_quantity": 1,
+        "reference_price": 50,
+        "enabled": true
+      }
+    ]
+  }'
+```
+
+The response includes the applied `controls` and the full list of resulting `markets`. If `trading_enabled` is omitted, the existing value is preserved.
+
+## Leaderboard
+
+`GET /api/v1/admin/leaderboard` returns the full leaderboard ranked by marked net PnL. Unlike the trader-facing leaderboard, this endpoint has no rate limiting and returns all traders.
+
+```bash
+curl \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  https://exchange.jamesxu.dev/api/v1/admin/leaderboard
+```
+
+Example response:
+
+```json
+[
+  {
+    "rank": 1,
+    "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+    "username": "team-alpha",
+    "net_pnl": 420,
+    "realized_pnl": 300,
+    "unrealized_pnl": 120,
+    "gross_exposure": 1000
+  }
+]
+```
+
+Net PnL is computed using settled prices for settled markets, mid-price of the best bid/ask when both sides are present, best available one-sided quote when only one side exists, or `reference_price` as a fallback.

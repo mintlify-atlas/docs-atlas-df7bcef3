@@ -1,0 +1,144 @@
+---
+title: "Recovery and Resync"
+description: "Handling sequence gaps and reconnection for L3 market data subscriptions."
+---
+
+## L3 sequence numbers
+
+Every `delta` message carries a monotonically increasing `sequence` number scoped to the subscribed market. After you receive a `snapshot` at sequence `N`, you should expect deltas at `N+1`, `N+2`, and so on.
+
+When your connection lags or the server detects an internal gap, it sends a `resync_required` message and clears the subscription. You must resubscribe to get back in sync.
+
+## Gap detection
+
+Your client should track the last seen sequence number and check each incoming delta:
+
+```python
+if delta["sequence"] != last_sequence + 1:
+    # gap detected — trigger recovery
+    handle_resync()
+else:
+    last_sequence = delta["sequence"]
+    apply_delta(delta)
+```
+
+The server also performs its own gap detection. If it notices your connection received a delta out of order, it immediately sends `resync_required` and drops the subscription server-side.
+
+## The resync_required message
+
+The server sends `resync_required` in two situations:
+
+- **Sequence gap** — the server observed that a delta it delivered did not match the expected sequence for your connection.
+- **Receiver lag** — your connection fell behind the broadcast buffer and messages were skipped.
+
+Example for a market-data gap:
+
+```json
+{
+  "type": "resync_required",
+  "channel": "l3",
+  "market": "BTC-USD",
+  "expected_sequence": 5,
+  "current_sequence": 9,
+  "reason": "market data lagged by 3 messages; resubscribe for a fresh snapshot"
+}
+```
+
+Example for receiver lag:
+
+```json
+{
+  "type": "resync_required",
+  "channel": "l3",
+  "market": "BTC-USD",
+  "expected_sequence": 5,
+  "current_sequence": 9,
+  "reason": "market sequence gap detected; resubscribe for a fresh snapshot"
+}
+```
+
+`expected_sequence` and `current_sequence` tell you how far behind you fell. The `reason` field contains a human-readable description.
+
+<Warning>
+There is no replay endpoint. You cannot request the messages you missed. The only recovery path is a fresh `subscribe`, which returns a new `snapshot` of current book state.
+</Warning>
+
+## Recovery flow
+
+When you receive `resync_required` for the `l3` channel:
+
+<Steps>
+  <Step title="Discard local book state">
+    Clear your in-memory order book for the affected market. Do not apply any further deltas for that market until after you receive the new snapshot.
+  </Step>
+  <Step title="Resubscribe">
+    Send a fresh `subscribe` message for the market:
+
+    ```json
+    {"op":"subscribe","channel":"l3","market":"BTC-USD","last_sequence":null}
+    ```
+
+    The server will respond with a new `snapshot`.
+  </Step>
+  <Step title="Rebuild from the snapshot">
+    Replace your local book with the contents of the snapshot. Record its `sequence` number as your new baseline.
+
+    ```json
+    {
+      "type": "snapshot",
+      "channel": "l3",
+      "market": "BTC-USD",
+      "sequence": 12,
+      "bids": [],
+      "asks": []
+    }
+    ```
+  </Step>
+  <Step title="Resume processing deltas">
+    Apply incoming `delta` messages normally, starting from `sequence + 1` of the snapshot you just received.
+  </Step>
+</Steps>
+
+## The last_sequence field
+
+The `subscribe` message accepts a `last_sequence` field:
+
+```json
+{"op":"subscribe","channel":"l3","market":"BTC-USD","last_sequence":12}
+```
+
+The protocol shape supports this field, but the current server implementation always returns a full snapshot regardless of the value provided. Pass `null` or omit the field — the behavior is identical.
+
+## Server-side triggers
+
+The server sends `resync_required` in two code paths:
+
+| Trigger | Description |
+|---|---|
+| Sequence gap | The delta delivered to your connection has a sequence number that does not equal `last_seen + 1`. The subscription is cleared immediately. |
+| Receiver lag | Your connection's broadcast channel buffer overflowed. The server skipped messages to catch up and cannot deliver the missed deltas. |
+
+Both paths clear the server-side subscription state, so you must resubscribe even if you choose to ignore the `resync_required` message.
+
+## Reconnection strategy
+
+On a clean disconnect or any unrecoverable error, treat the new connection as a fresh session:
+
+<Steps>
+  <Step title="Reconnect">
+    Establish a new WebSocket connection to `wss://exchange.jamesxu.dev/ws`.
+  </Step>
+  <Step title="Reauthenticate">
+    Send an `authenticate` message with your API key.
+  </Step>
+  <Step title="Resubscribe">
+    Send a `subscribe` message for each market you want to track. You will receive a fresh `snapshot` for each.
+  </Step>
+  <Step title="Re-bootstrap account state">
+    After reconnect, re-fetch open orders, positions, and fills from the REST API before trusting any locally cached state. Market-data sequence counters restart from `0` after a backend restart, so there is no continuity guarantee.
+  </Step>
+</Steps>
+
+<Note>
+After a backend restart, all market-data sequence numbers reset to `0`. Clients should always re-bootstrap from a fresh snapshot and not assume their previous sequence baseline is still valid.
+</Note>

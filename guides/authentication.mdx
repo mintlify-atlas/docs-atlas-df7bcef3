@@ -1,0 +1,163 @@
+---
+title: "Authentication"
+description: "API key authentication for trader and admin REST routes and WebSocket sessions."
+---
+
+## Overview
+
+Exchange uses a simple, key-based authentication model. There are no passwords, no JWTs, and no OAuth flows.
+
+Two roles exist:
+
+- **Trader** — assigned an API key by an operator. Used for order entry, account queries, and WebSocket trading.
+- **Admin** — holds a static bearer token configured at server startup. Used for operator control-plane actions.
+
+Traders cannot self-register. An operator must provision each trader account before they can authenticate.
+
+## Trader API keys
+
+Each trader account has exactly one API key, generated at provisioning time. Keys have the format:
+
+```text
+exch_1d4208be6fa84b8cb0a2e5cfa9508d5f
+```
+
+The prefix `exch_` is followed by a 32-character hex string (a UUID without hyphens). Keys are permanent — there is no rotation mechanism or expiry.
+
+<Warning>
+Treat your API key like a password. Anyone who holds it can trade on your behalf, read your positions and fills, and cancel your open orders.
+</Warning>
+
+## REST authentication
+
+<Tabs>
+  <Tab title="Trader routes">
+
+Authenticated trader routes require the `x-api-key` header:
+
+```http
+x-api-key: exch_1d4208be6fa84b8cb0a2e5cfa9508d5f
+```
+
+**Example — fetch your profile:**
+
+```bash
+curl https://exchange.jamesxu.dev/api/v1/user \
+  -H "x-api-key: exch_1d4208be6fa84b8cb0a2e5cfa9508d5f"
+```
+
+```json
+{
+  "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+  "username": "team-alpha",
+  "api_key": "exch_1d4208be6fa84b8cb0a2e5cfa9508d5f",
+  "created_at": "2024-01-15T10:00:00Z"
+}
+```
+
+The following endpoints require a valid `x-api-key` header:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/user` | Authenticated user profile |
+| `GET` | `/api/v1/positions` | Open positions |
+| `GET` | `/api/v1/portfolio` | Portfolio snapshot with PnL |
+| `GET` | `/api/v1/open-orders` | Resting orders |
+| `GET` | `/api/v1/fills` | Fill history |
+| `POST` | `/api/v1/orders` | Submit a limit order |
+| `PATCH` | `/api/v1/orders/{order_id}` | Amend a resting order |
+| `DELETE` | `/api/v1/orders/{order_id}` | Cancel a resting order |
+
+If the header is missing, the server returns `401 missing authentication`. If the key is not recognized, it returns `401 invalid api key`.
+
+  </Tab>
+  <Tab title="Admin routes">
+
+Admin routes require a bearer token in the `Authorization` header:
+
+```http
+Authorization: Bearer ADMIN_API_TOKEN
+```
+
+`ADMIN_API_TOKEN` is a static secret set in the exchange server configuration at startup. It does not follow the `exch_` key format.
+
+**Example — provision a trader:**
+
+```bash
+curl -X POST https://exchange.jamesxu.dev/api/v1/admin/users \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "team-alpha"}'
+```
+
+```json
+{
+  "profile": {
+    "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+    "username": "team-alpha",
+    "api_key": "exch_1d4208be6fa84b8cb0a2e5cfa9508d5f",
+    "created_at": "2024-01-15T10:00:00Z"
+  }
+}
+```
+
+Admin endpoints include:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/admin/users` | Provision a trader account |
+| `POST` | `/api/v1/admin/users/reset` | Reset all user trading state |
+| `GET/POST/PATCH/DELETE` | `/api/v1/admin/markets/*` | Market lifecycle management |
+| `POST` | `/api/v1/admin/trading/start` | Enable order submission |
+| `POST` | `/api/v1/admin/trading/stop` | Disable order submission |
+
+If the `Authorization` header is absent, the server returns `401 missing admin authentication`. If the token does not match, it returns `401 invalid admin token`.
+
+<Note>
+The admin token is a shared secret, not scoped to an individual user. All admin actions are recorded in an audit log with the actor identified as `admin-token`.
+</Note>
+
+  </Tab>
+</Tabs>
+
+## WebSocket authentication
+
+Connect to the WebSocket endpoint:
+
+```text
+wss://exchange.jamesxu.dev/ws
+```
+
+After connecting, send an `authenticate` message:
+
+```json
+{"op": "authenticate", "api_key": "exch_1d4208be6fa84b8cb0a2e5cfa9508d5f"}
+```
+
+On success, the server responds:
+
+```json
+{
+  "type": "authenticated",
+  "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+  "username": "team-alpha"
+}
+```
+
+You can then submit orders and receive private user events over the same connection.
+
+### Market data without authentication
+
+<Note>
+WebSocket market data subscriptions (orderbook snapshots and deltas) can be established before sending an `authenticate` message. You do not need an API key to observe public market data.
+</Note>
+
+Only trading operations and user-scoped event streams require a successful `authenticate` message. A typical integration subscribes to market data immediately on connect, then authenticates in parallel or shortly after.
+
+## Security notes
+
+- There are no passwords. The API key is the only trader credential.
+- There is no JWT or OAuth flow. There is no token refresh.
+- API keys do not expire. If a key is compromised, an operator must re-provision the affected trader account.
+- Store your API key in an environment variable or secrets manager — never hardcode it in source code or commit it to version control.
+- Admin tokens are server-side configuration and should be rotated by redeploying the exchange with a new value.

@@ -1,0 +1,181 @@
+---
+title: "Market Lifecycle"
+description: "Creating, updating, disabling, settling, and deleting markets."
+---
+
+Markets move through a defined lifecycle: created, optionally disabled and re-enabled, settled, and deleted. Each state change affects what traders can do in that market.
+
+## Market states
+
+| State | New orders | Resting orders | Positions |
+| --- | --- | --- | --- |
+| `enabled` | Accepted | Rest and match normally | Accumulate as orders fill |
+| `disabled` | Rejected with `market_disabled` | Remain resting until cancelled | Unchanged |
+| `settled` | Rejected | All cancelled at settlement time | Realized at settlement price, then zeroed |
+
+## Creating a market
+
+`POST /api/v1/admin/markets` creates or replaces a market definition. The `market_id` must follow the format `{base_asset}-{quote_asset}` — the endpoint validates that these three fields are consistent.
+
+**Required fields:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `market_id` | `string` | Market identifier, e.g. `"BTC-USD"`. Must match `"{base_asset}-{quote_asset}"`. |
+| `base_asset` | `string` | Base asset symbol, e.g. `"BTC"`. |
+| `quote_asset` | `string` | Quote asset symbol, e.g. `"USD"`. |
+| `tick_size` | `u64` | Minimum price increment. Must be greater than zero. |
+| `min_order_quantity` | `u64` | Minimum order quantity. Must be greater than zero. |
+| `reference_price` | `u64 \| null` | Reference price used for marking when no live quote exists. |
+| `enabled` | `bool` | Whether the market accepts orders immediately on creation. |
+| `display_name` | `string \| null` | Human-readable name shown to traders. Falls back to `market_id` if omitted. |
+
+```bash
+curl \
+  -X POST \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/admin/markets \
+  -d '{
+    "market_id": "BTC-USD",
+    "display_name": "Bitcoin",
+    "base_asset": "BTC",
+    "quote_asset": "USD",
+    "tick_size": 1,
+    "min_order_quantity": 1,
+    "reference_price": 100,
+    "enabled": true
+  }'
+```
+
+If a market with the same `market_id` already exists and is not settled, this call replaces its definition. Attempting to upsert a settled market returns `409 Conflict`.
+
+## Updating a market
+
+`PATCH /api/v1/admin/markets/{market_id}` updates individual fields of an existing market without replacing it entirely. All fields are optional — only include the fields you want to change.
+
+**Patchable fields:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `display_name` | `string` | Update the human-readable name. |
+| `tick_size` | `u64` | Update the minimum price increment. |
+| `min_order_quantity` | `u64` | Update the minimum order quantity. |
+| `reference_price` | `u64` | Update the reference price for marking. |
+| `enabled` | `bool` | `true` to enable the market, `false` to disable it. |
+
+**Disable a market:**
+
+```bash
+curl \
+  -X PATCH \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD \
+  -d '{"enabled": false}'
+```
+
+**Re-enable a market:**
+
+```bash
+curl \
+  -X PATCH \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  -H "content-type: application/json" \
+  https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD \
+  -d '{"enabled": true}'
+```
+
+When a market is disabled, traders who submit new orders for that market receive a `market_disabled` rejection. Existing resting orders are not cancelled — they remain on the book and continue to match if the market is re-enabled.
+
+Patching a settled market returns `409 Conflict`.
+
+## Settling a market
+
+Settlement is the end-of-life operation for a market. It cancels all resting orders, realizes PnL for every trader with an open position at the supplied price, and flattens all positions to zero.
+
+<Steps>
+  <Step title="Choose a settlement price">
+    Decide the true value per unit for the market. This is the price at which all open net positions will be marked and closed. The price must be greater than zero.
+  </Step>
+  <Step title="Send the settle request">
+    `POST /api/v1/admin/markets/{market_id}/settle` with the `settlement_price` in the request body:
+
+    ```bash
+    curl \
+      -X POST \
+      -H "Authorization: Bearer ADMIN_API_TOKEN" \
+      -H "content-type: application/json" \
+      https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD/settle \
+      -d '{"settlement_price": 150}'
+    ```
+
+    You can optionally include an `announcement` string to override the default settlement broadcast message sent to all traders:
+
+    ```bash
+    curl \
+      -X POST \
+      -H "Authorization: Bearer ADMIN_API_TOKEN" \
+      -H "content-type: application/json" \
+      https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD/settle \
+      -d '{"settlement_price": 150, "announcement": "BTC-USD settled at 150. Well played."}'
+    ```
+  </Step>
+  <Step title="Review the settlement summary">
+    The response details how many orders were cancelled, how many traders were affected, and the total settled quantity:
+
+    ```json
+    {
+      "market": {
+        "market_id": "BTC-USD",
+        "status": "settled",
+        "settlement_price": 150
+      },
+      "canceled_orders": 5,
+      "affected_traders": 3,
+      "settled_quantity": 200,
+      "settlement_price": 150
+    }
+    ```
+  </Step>
+  <Step title="Confirm market status">
+    After settlement the market moves to `settled` status. A broadcast `admin_message` event is delivered to all connected WebSocket clients announcing the settlement. No further order submissions are accepted for this market.
+  </Step>
+</Steps>
+
+**Settlement mechanics:**
+
+- All resting orders for the market are cancelled before PnL is realized.
+- Each trader's signed net position is multiplied by `(settlement_price - average_entry_price)` to compute realized PnL.
+- After settlement, every trader's net position in this market is set to zero.
+- The market's `settlement_price` field is recorded on the market definition and used for all future mark calculations on the leaderboard.
+
+<Warning>
+  Settlement is irreversible. Once a market is settled it cannot be re-opened or patched. To create a new round in the same instrument, delete the settled market and create a fresh one.
+</Warning>
+
+## Deleting a market
+
+`DELETE /api/v1/admin/markets/{market_id}` removes the market definition entirely. The market must have no open orders at the time of deletion — if any resting orders remain, the request returns `409 Conflict` with the error `cannot delete market with open orders`.
+
+```bash
+curl \
+  -X DELETE \
+  -H "Authorization: Bearer ADMIN_API_TOKEN" \
+  https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD
+```
+
+Typical workflow before deletion:
+
+1. Settle the market to cancel all resting orders and zero positions.
+2. Confirm `canceled_orders` is zero or that orders have been manually cancelled.
+3. Call `DELETE /api/v1/admin/markets/{market_id}`.
+
+## Risk model
+
+The exchange enforces a per-market net position limit of **+/-1000** on every trader. This limit is checked at order admission time using worst-case net exposure — the engine considers the trader's current net position plus the signed quantity of all existing resting orders before accepting a new order.
+
+- Traders can go long or short from a flat position with no pre-seeded inventory.
+- A sell order is valid even if the trader holds no existing position.
+- Realized PnL accumulates as positions are reduced, flipped, or settled.
+- The limit is symmetric: a trader cannot hold more than +1000 net long or more than 1000 net short in any single market.

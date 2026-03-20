@@ -1,0 +1,82 @@
+---
+title: "Introduction"
+description: "Public API documentation for the Exchange trading platform — REST and WebSocket integrations for market data, order entry, and account management."
+---
+
+Exchange is a high-performance trading platform built in Rust, exposing REST and WebSocket APIs for competition-style trading. Operators provision traders, create markets, and control the exchange lifecycle. Traders submit and manage orders, view positions and fills, and subscribe to live L3 market data.
+
+## Base URLs
+
+| Protocol | URL |
+| --- | --- |
+| REST | `https://exchange.jamesxu.dev` |
+| WebSocket | `wss://exchange.jamesxu.dev/ws` |
+| OpenAPI JSON | `https://exchange.jamesxu.dev/api-doc/openapi.json` |
+| Swagger UI | `https://exchange.jamesxu.dev/docs` |
+
+## What you can do
+
+<CardGroup cols={2}>
+  <Card title="Submit orders" icon="arrow-right-arrow-left" href="/guides/rest-api">
+    Place, amend, and cancel limit orders via REST or WebSocket.
+  </Card>
+  <Card title="Stream market data" icon="chart-line" href="/guides/websocket-api">
+    Subscribe to real-time L3 orderbook snapshots and deltas over WebSocket.
+  </Card>
+  <Card title="View positions & fills" icon="wallet" href="/guides/rest-api">
+    Query your account state, open orders, fills, and portfolio PnL.
+  </Card>
+  <Card title="Operator control-plane" icon="sliders" href="/guides/admin-overview">
+    Start/stop trading, create markets, settle positions, and manage users.
+  </Card>
+</CardGroup>
+
+## Authentication model
+
+Exchange uses a simple, key-based authentication model — no passwords, no JWTs, no OAuth.
+
+- **Trader routes** authenticate with an assigned API key in the `x-api-key` header
+- **Admin routes** authenticate with a bearer token in the `Authorization` header
+- **WebSocket sessions** authenticate by sending `{"op":"authenticate","api_key":"..."}` on the socket
+
+Traders are provisioned by operators. There is no self-registration.
+
+## Quick links
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Make your first API call in under 5 minutes.
+  </Card>
+  <Card title="Authentication" icon="key" href="/guides/authentication">
+    Understand API keys, admin tokens, and WebSocket auth.
+  </Card>
+  <Card title="REST API reference" icon="code" href="/guides/rest-api">
+    Every endpoint, request shape, and response schema.
+  </Card>
+  <Card title="WebSocket API" icon="plug" href="/guides/websocket-api">
+    Live market data, trading, and user event protocols.
+  </Card>
+  <Card title="Error codes" icon="triangle-exclamation" href="/guides/error-codes">
+    HTTP status codes and WebSocket reject/error codes.
+  </Card>
+  <Card title="Examples" icon="terminal" href="/guides/examples">
+    Concrete curl, JavaScript, and WebSocket examples.
+  </Card>
+</CardGroup>
+
+## Key platform characteristics
+
+<AccordionGroup>
+  <Accordion title="In-memory matching engine">
+    Orders are matched in memory for minimal latency. The L3 orderbook tracks every resting order individually — each addition, fill, and cancellation is broadcast as a sequenced delta over WebSocket.
+  </Accordion>
+  <Accordion title="Position-based risk model">
+    Risk is enforced at order admission time using worst-case net position. Each market has a fixed net position limit of **+/-1000**. Traders can go long or short from flat without pre-seeding inventory — the exchange tracks signed net positions and accumulated realized PnL.
+  </Accordion>
+  <Accordion title="PostgreSQL persistence">
+    When `STORAGE_BACKEND=postgres` is configured, orders, fills, positions, and audit events are durably written via a background batch writer thread. On startup, in-memory orderbooks are rebuilt from persisted open orders before the exchange begins serving traffic.
+  </Accordion>
+  <Accordion title="Rate limiting">
+    Authenticated trader REST routes are rate-limited to **100 operations per second** per user. Requests over this limit are rejected.
+  </Accordion>
+</AccordionGroup>

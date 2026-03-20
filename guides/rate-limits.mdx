@@ -1,0 +1,57 @@
+---
+title: "Rate Limits"
+description: "Per-user rate limiting on authenticated REST routes."
+---
+
+## Limits
+
+<Note>
+  Authenticated trader REST routes are rate-limited to **100 operations per second** per user. Requests over this limit are rejected with `429 Too Many Requests`.
+</Note>
+
+The limit is enforced independently for each trader. One trader exceeding the limit does not affect any other trader's quota.
+
+## Which routes are rate-limited
+
+The rate limit applies to all authenticated trader routes — those requiring an `x-api-key` header:
+
+| Route | Rate-limited |
+| --- | --- |
+| `GET /api/v1/user` | Yes |
+| `GET /api/v1/positions` | Yes |
+| `GET /api/v1/portfolio` | Yes |
+| `GET /api/v1/leaderboard` | Yes |
+| `GET /api/v1/open-orders` | Yes |
+| `GET /api/v1/fills` | Yes |
+| `POST /api/v1/orders` | Yes |
+| `PATCH /api/v1/orders/{order_id}` | Yes |
+| `DELETE /api/v1/orders/{order_id}` | Yes |
+| `GET /health` | No |
+| `GET /api/v1/markets` | No |
+| Admin routes | No |
+
+## What happens when exceeded
+
+When a request exceeds the rate limit, the server responds with `429 Too Many Requests` and does not process the request:
+
+```json
+{
+  "error": "per-user rate limit exceeded: max 100 ops/sec"
+}
+```
+
+The request is dropped entirely. No partial processing occurs.
+
+## Strategies for staying within limits
+
+<Tip>
+  Use the WebSocket API for order entry if you need high-frequency trading. The WebSocket connection has no explicit per-message rate limit and is better suited for rapid order submission and cancellation.
+</Tip>
+
+<Tip>
+  Avoid polling account state endpoints (positions, fills, open-orders) in a tight loop. Subscribe to the WebSocket `l3` channel for real-time order and fill events instead, and query REST endpoints only for initial state on startup.
+</Tip>
+
+- **Batch reads at startup**: Fetch positions, open orders, and fills once when your client initializes, then keep state current via WebSocket events.
+- **Avoid redundant requests**: Cache the leaderboard and portfolio responses locally. These do not change on every tick.
+- **Prefer WebSocket for order management**: `submit_order`, `cancel_order`, and `amend_order` WebSocket operations do not count toward the REST rate limit.
