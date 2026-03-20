@@ -49,7 +49,12 @@ No authentication required.
       "status": "ok",
       "service": "exchange",
       "now": "2026-03-18T15:27:00.000000Z",
-      "persistence": { "mode": "ok" }
+      "persistence": {
+        "backend": "in_memory",
+        "mode": "disabled",
+        "queue_depth": 0,
+        "last_error": null
+      }
     }
     ```
   </Accordion>
@@ -180,10 +185,30 @@ No authentication required.
       <Accordion title="GET /api/v1/leaderboard">
         Returns traders ranked by their current marked net PnL. Marking uses settled prices, orderbook mid prices, or market reference prices.
 
+        **Query parameters**
+
+        <ParamField path="query.limit" type="number">
+          Optional. Maximum number of rows to return. Omit to return all traders.
+        </ParamField>
+
         ```bash
         curl \
           -H "x-api-key: YOUR_API_KEY" \
-          https://exchange.jamesxu.dev/api/v1/leaderboard
+          "https://exchange.jamesxu.dev/api/v1/leaderboard?limit=10"
+        ```
+
+        ```json
+        [
+          {
+            "rank": 1,
+            "trader_id": "9d64e278-8b56-46e9-9cab-18c5b22f2fb9",
+            "username": "team-alpha",
+            "net_pnl": 420,
+            "realized_pnl": 300,
+            "unrealized_pnl": 120,
+            "gross_exposure": 1000
+          }
+        ]
         ```
       </Accordion>
 
@@ -452,13 +477,15 @@ No authentication required.
       </Accordion>
 
       <Accordion title="GET /api/v1/admin/state">
-        Returns the current exchange state including trading controls, configured markets, recent admin messages, and persistence status.
+        Returns the current exchange state including trading controls, configured markets, recent admin messages (up to 50), and persistence status.
 
         ```bash
         curl \
           -H "Authorization: Bearer ADMIN_API_TOKEN" \
           https://exchange.jamesxu.dev/api/v1/admin/state
         ```
+
+        Response fields: `controls` (ExchangeControls), `markets` (array of MarketDefinition), `recent_messages` (up to 50 AdminMessageEntry), `persistence` (PersistenceStatus).
       </Accordion>
 
       <Accordion title="POST /api/v1/admin/trading/start">
@@ -501,8 +528,8 @@ No authentication required.
         <ParamField path="body.market_id" type="string" required>
           Market symbol in `BASE-QUOTE` format, e.g. `BTC-USD`.
         </ParamField>
-        <ParamField path="body.display_name" type="string" required>
-          Human-readable market name.
+        <ParamField path="body.display_name" type="string">
+          Optional. Human-readable market name. Falls back to `market_id` if omitted.
         </ParamField>
         <ParamField path="body.base_asset" type="string" required>
           Base asset symbol.
@@ -519,8 +546,8 @@ No authentication required.
         <ParamField path="body.reference_price" type="number">
           Optional reference price used for marking when no trades have occurred.
         </ParamField>
-        <ParamField path="body.enabled" type="boolean">
-          Whether the market is open for trading on creation.
+        <ParamField path="body.enabled" type="boolean" required>
+          Whether the market is open for trading on creation. `true` creates an enabled market, `false` creates a disabled one.
         </ParamField>
 
         ```bash
@@ -590,7 +617,10 @@ No authentication required.
         **Request body**
 
         <ParamField path="body.settlement_price" type="number" required>
-          The admin-determined true value per share. PnL is realized against each trader's signed net position at this price.
+          The admin-determined true value per share. PnL is realized against each trader's signed net position at this price. Must be greater than zero.
+        </ParamField>
+        <ParamField path="body.announcement" type="string">
+          Optional. Custom announcement text broadcast to all WebSocket clients after settlement. Defaults to a generated message if omitted.
         </ParamField>
 
         ```bash
@@ -601,10 +631,33 @@ No authentication required.
           https://exchange.jamesxu.dev/api/v1/admin/markets/BTC-USD/settle \
           -d '{"settlement_price":150}'
         ```
+
+        ```json
+        {
+          "market": {
+            "market_id": "BTC-USD",
+            "status": "settled",
+            "settlement_price": 150
+          },
+          "canceled_orders": 5,
+          "affected_traders": 3,
+          "settled_quantity": 200,
+          "settlement_price": 150
+        }
+        ```
       </Accordion>
 
       <Accordion title="POST /api/v1/admin/config/load">
         Bulk-loads exchange configuration and market definitions. Use this to initialize or replace the full exchange state in one call.
+
+        **Request body**
+
+        <ParamField path="body.trading_enabled" type="boolean">
+          Optional. Set to `true` or `false` to control trading. Omit to leave the current value unchanged.
+        </ParamField>
+        <ParamField path="body.markets" type="array" required>
+          Array of market definitions. Each entry uses the same shape as `POST /api/v1/admin/markets`.
+        </ParamField>
 
         ```bash
         curl \
@@ -619,10 +672,16 @@ No authentication required.
       <Accordion title="GET /api/v1/admin/messages">
         Returns recent admin messages sent to traders.
 
+        **Query parameters**
+
+        <ParamField path="query.limit" type="number">
+          Optional. Maximum number of messages to return. Defaults to `50`.
+        </ParamField>
+
         ```bash
         curl \
           -H "Authorization: Bearer ADMIN_API_TOKEN" \
-          https://exchange.jamesxu.dev/api/v1/admin/messages
+          "https://exchange.jamesxu.dev/api/v1/admin/messages?limit=20"
         ```
       </Accordion>
 
@@ -638,10 +697,10 @@ No authentication required.
           Optional. Market context for the message.
         </ParamField>
         <ParamField path="body.level" type="string" required>
-          Severity level, e.g. `info`, `warning`.
+          Severity level: `info`, `warning`, or `critical`.
         </ParamField>
-        <ParamField path="body.title" type="string" required>
-          Short message title.
+        <ParamField path="body.title" type="string">
+          Optional. Short message title.
         </ParamField>
         <ParamField path="body.body" type="string" required>
           Full message body.
@@ -676,15 +735,29 @@ No authentication required.
           -H "Authorization: Bearer ADMIN_API_TOKEN" \
           https://exchange.jamesxu.dev/api/v1/admin/users/reset
         ```
+
+        ```json
+        {
+          "cleared_orders": 12,
+          "cleared_positions": 8,
+          "cleared_fills": 34
+        }
+        ```
       </Accordion>
 
       <Accordion title="GET /api/v1/admin/leaderboard">
         Returns a leaderboard snapshot with all traders ranked by marked net PnL. Useful for competition scoring and monitoring.
 
+        **Query parameters**
+
+        <ParamField path="query.limit" type="number">
+          Optional. Maximum number of rows to return. Omit to return all traders.
+        </ParamField>
+
         ```bash
         curl \
           -H "Authorization: Bearer ADMIN_API_TOKEN" \
-          https://exchange.jamesxu.dev/api/v1/admin/leaderboard
+          "https://exchange.jamesxu.dev/api/v1/admin/leaderboard?limit=20"
         ```
       </Accordion>
     </AccordionGroup>

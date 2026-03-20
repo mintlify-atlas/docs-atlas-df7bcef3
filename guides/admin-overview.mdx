@@ -5,6 +5,28 @@ description: "Operator guide for user provisioning, exchange control, and admin 
 
 Admin routes let operators provision traders, inspect exchange state, broadcast messages, and control trading globally. All admin endpoints require a bearer token configured at startup.
 
+## Environment configuration
+
+The exchange process reads its configuration from environment variables at startup. All variables have defaults.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BIND_ADDR` | `0.0.0.0:8080` | TCP address to bind the HTTP server to |
+| `ADMIN_API_TOKEN` | `local-admin-token` | Bearer token required for all admin endpoints. Change in production. |
+| `STORAGE_BACKEND` | `in_memory` | `in_memory` or `postgres`. Use `postgres` for durable persistence. |
+| `DATABASE_URL` | `postgres://exchange:exchange@localhost:5432/exchange` | PostgreSQL connection string. Only used when `STORAGE_BACKEND=postgres`. |
+| `WS_BROADCAST_BUFFER` | `1024` | Number of in-flight broadcast messages per channel before receivers lag. Increase for high-throughput markets. |
+| `PER_USER_REQUESTS_PER_SECOND` | `100` | Per-user rate limit for authenticated REST routes. |
+| `POSTGRES_WRITE_BATCH_SIZE` | `128` | Maximum operations per PostgreSQL write batch. |
+| `POSTGRES_WRITE_FLUSH_INTERVAL_MS` | `25` | How often (in ms) the background writer flushes pending operations. |
+| `POSTGRES_WRITE_QUEUE_CAPACITY` | `4096` | Depth of the background writer queue. Writes block when the queue is full. |
+| `POSTGRES_WRITE_RETRY_BACKOFF_MS` | `250` | Backoff (in ms) between retries after a flush failure. |
+| `RUST_LOG` | `exchange=info,tower_http=info` | Log filter. Use `exchange=debug` for verbose output. |
+
+<Warning>
+  Always set `ADMIN_API_TOKEN` to a strong secret before deploying to any shared or public environment. The default `local-admin-token` value grants full operator access.
+</Warning>
+
 ## Admin authentication
 
 Every admin request must include the `ADMIN_API_TOKEN` value set at startup as a bearer token:
@@ -102,16 +124,26 @@ Example response shape:
     {
       "market_id": "BTC-USD",
       "display_name": "Bitcoin",
-      "status": "enabled",
+      "base_asset": "BTC",
+      "quote_asset": "USD",
       "tick_size": 1,
       "min_order_quantity": 1,
-      "reference_price": 100
+      "reference_price": 100,
+      "settlement_price": null,
+      "status": "enabled",
+      "created_at": "2026-03-18T15:00:00.000000Z",
+      "updated_at": "2026-03-18T15:00:00.000000Z"
     }
   ],
   "recent_messages": [],
   "persistence": {
     "backend": "postgres",
-    "healthy": true
+    "mode": "ok",
+    "queue_depth": 0,
+    "in_flight_ops": 0,
+    "total_enqueued": 0,
+    "total_flushes": 0,
+    "last_error": null
   }
 }
 ```
@@ -161,7 +193,7 @@ Admin messages can be broadcast to all connected traders or targeted at a specif
 | --- | --- | --- |
 | `target_username` | `string \| null` | Target a specific trader by username, or `null` to broadcast to all. |
 | `market` | `string \| null` | Optional market context (e.g. `"BTC-USD"`). |
-| `level` | `string` | Severity: `info`, `warning`, or `critical`. |
+| `level` | `string` | Severity: `info`, `warning`, or `critical`. Required. |
 | `title` | `string \| null` | Optional short title for the message. |
 | `body` | `string` | Required message body. |
 

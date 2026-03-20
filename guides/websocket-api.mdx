@@ -252,6 +252,8 @@ Sent immediately after a `subscribe`. Contains the full L3 order book state at t
 
 A sequenced update to the order book. Each delta carries one or more events describing changes since the previous sequence number.
 
+Order added example:
+
 ```json
 {
   "type": "delta",
@@ -273,6 +275,32 @@ A sequenced update to the order book. Each delta carries one or more events desc
 }
 ```
 
+Trade (fill) example:
+
+```json
+{
+  "type": "delta",
+  "channel": "l3",
+  "market": "BTC-USD",
+  "sequence": 3,
+  "events": [
+    {
+      "kind": "order_removed",
+      "order_id": "4d6c28f4-b349-4a4d-8927-8141c36eb6eb",
+      "side": "SELL",
+      "price": 100
+    },
+    {
+      "kind": "trade",
+      "maker_order_id": "4d6c28f4-b349-4a4d-8927-8141c36eb6eb",
+      "taker_order_id": "66377526-7b98-485a-8c40-7024e68fa3c5",
+      "price": 100,
+      "quantity": 2
+    }
+  ]
+}
+```
+
 <ParamField body="sequence" type="number">
   Monotonically increasing sequence number. If you receive a delta where `sequence` is not exactly `previous_sequence + 1`, a gap has occurred — see [Recovery and Resync](/guides/recovery-and-resync).
 </ParamField>
@@ -280,9 +308,10 @@ A sequenced update to the order book. Each delta carries one or more events desc
 <ParamField body="events" type="array">
   One or more book change events. Each event has a `kind` field:
 
-  - `order_added` — a new order joined the book
-  - `order_filled` — an order was partially or fully filled
-  - `order_cancelled` — an order was removed from the book
+  - `order_added` — a new resting order was added to the book
+  - `order_updated` — an order's remaining quantity changed (e.g. after an amend or partial fill)
+  - `order_removed` — an order was removed (cancelled or fully filled)
+  - `trade` — a trade executed; includes `maker_order_id`, `taker_order_id`, `price`, and `quantity`
 </ParamField>
 
 <Note>
@@ -433,12 +462,26 @@ Broadcast by operators to one or all authenticated traders.
 ```
 
 <ParamField body="level" type="string">
-  Severity of the message: `"info"`, `"warning"`, or `"error"`.
+  Severity of the message: `"info"`, `"warning"`, or `"critical"`.
 </ParamField>
 
 <ParamField body="target_username" type="string">
   If non-null, this message was sent to a specific trader. If null, it is a broadcast to all authenticated connections.
 </ParamField>
+
+---
+
+### unsubscribed
+
+Sent by the server in response to an `unsubscribe` message confirming the subscription was cleared.
+
+```json
+{
+  "type": "unsubscribed",
+  "channel": "l3",
+  "market": "BTC-USD"
+}
+```
 
 ---
 

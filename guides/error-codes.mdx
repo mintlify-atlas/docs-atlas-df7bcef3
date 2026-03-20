@@ -111,7 +111,12 @@ Example degraded response:
   "status": "degraded",
   "service": "exchange",
   "now": "2026-03-18T15:27:00.000000Z",
-  "persistence": { "mode": "retrying" }
+  "persistence": {
+    "backend": "postgres",
+    "mode": "retrying",
+    "queue_depth": 412,
+    "last_error": "connection refused"
+  }
 }
 ```
 
