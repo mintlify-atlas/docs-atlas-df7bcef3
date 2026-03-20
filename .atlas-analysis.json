@@ -1,0 +1,105 @@
+{
+  "projectType": "api-service",
+  "projectName": "Exchange API",
+  "projectDescription": "A high-performance Rust trading exchange service providing REST and WebSocket APIs for market data, order entry, account management, and operator control-plane workflows.",
+  "theme": "sequoia",
+  "primaryColor": "#1F7A5A",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "guides/authentication"
+            ]
+          },
+          {
+            "group": "REST API",
+            "pages": [
+              "guides/rest-api",
+              "guides/error-codes",
+              "guides/rate-limits"
+            ]
+          },
+          {
+            "group": "WebSocket API",
+            "pages": [
+              "guides/websocket-api",
+              "guides/recovery-and-resync"
+            ]
+          },
+          {
+            "group": "Operator Guide",
+            "pages": [
+              "guides/admin-overview",
+              "guides/market-lifecycle"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "guides/examples"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/overview"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "High-performance Rust exchange core built on Axum with REST and WebSocket APIs",
+    "In-memory matching engine with L3 orderbook and real-time WebSocket market data feed",
+    "Per-user 100 ops/sec rate limiting on authenticated routes",
+    "PostgreSQL-backed persistence with background batch writer and startup recovery",
+    "Operator control-plane: start/stop trading, create/settle markets, provision users",
+    "Position-based risk: per-market net position limit of +/-1000 with long/short support",
+    "OpenAPI schema served live at /api-doc/openapi.json with Swagger UI at /docs",
+    "WebSocket trading: submit, amend, and cancel orders with ack/reject/fill/order_state events"
+  ],
+  "publicApiSurface": [
+    "GET /health",
+    "GET /api/v1/markets",
+    "GET /api/v1/user",
+    "GET /api/v1/positions",
+    "GET /api/v1/portfolio",
+    "GET /api/v1/leaderboard",
+    "GET /api/v1/open-orders",
+    "GET /api/v1/fills",
+    "POST /api/v1/orders",
+    "PATCH /api/v1/orders/{order_id}",
+    "DELETE /api/v1/orders/{order_id}",
+    "POST /api/v1/admin/users",
+    "POST /api/v1/admin/trading/start",
+    "POST /api/v1/admin/trading/stop",
+    "GET|POST /api/v1/admin/markets",
+    "PATCH|DELETE /api/v1/admin/markets/{market_id}",
+    "POST /api/v1/admin/markets/{market_id}/settle",
+    "POST /api/v1/admin/config/load",
+    "GET|POST /api/v1/admin/messages",
+    "POST /api/v1/admin/users/reset",
+    "GET /api/v1/admin/leaderboard",
+    "GET /api/v1/admin/state",
+    "WS /ws — authenticate, subscribe/unsubscribe l3, submit_order, cancel_order, amend_order"
+  ]
+}
